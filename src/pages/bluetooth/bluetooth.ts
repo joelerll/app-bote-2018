@@ -1,6 +1,7 @@
 import { Component, Injectable } from '@angular/core';
-import { IonicPage, Platform, ToastController, AlertController, Refresher } from 'ionic-angular';
+import { IonicPage, Platform, ToastController, AlertController, Refresher, LoadingController } from 'ionic-angular';
 import { BluetoothSerial } from '@ionic-native/bluetooth-serial';
+import { ScreenOrientation } from '@ionic-native/screen-orientation';
 import { Observable } from 'rxjs';
 import { ISubscription } from "rxjs/Subscription";
 
@@ -21,9 +22,10 @@ import { ISubscription } from "rxjs/Subscription";
 export class BluetoothPage {
 
   devices: Array<any> = [];
-  mostrarSpiner = true;
+  mostrarSpiner = false;
   mensaje: string = "";
   conexion: ISubscription;
+  conectado: Boolean = false;
   conexionMensajes: ISubscription;
   reader: Observable<any>;
   rawListener;
@@ -32,21 +34,21 @@ export class BluetoothPage {
     private platform: Platform,
     private toastCtrl: ToastController,
     private alertCtrl: AlertController,
-    private bluetoothSerial: BluetoothSerial
-  ) { }
+    private bluetoothSerial: BluetoothSerial,
+    private loadingCtrl: LoadingController,
+    private screenOrientation: ScreenOrientation
+  ) {
+  }
   /**
    * Al entrar en la ventana ejecuta la función para buscar dispositivos bluetooth.
    */
   ionViewDidEnter() {
     this.platform.ready().then(() => {
-      this.buscarBluetooth().then((success: Array<Object>) => {
-        this.devices = success;
-        this.mostrarSpiner = false;
-      }, fail => {
-        this.presentToast(fail);
-        this.mostrarSpiner = false;
-      });
     });
+  }
+
+  lockScreenOrientation() {
+    this.screenOrientation.lock(this.screenOrientation.ORIENTATIONS.LANDSCAPE);
   }
   /**
    * Al cerrar la aplicación se asegura de que se cierre la conexión bluetooth.
@@ -63,6 +65,7 @@ export class BluetoothPage {
     return new Promise((resolve, reject) => {
       this.bluetoothSerial.isEnabled().then(success =>{
         this.bluetoothSerial.discoverUnpaired().then(success => {
+          this.mostrarSpiner = false;
           if (success.length > 0) {
             resolve(success);
           } else {
@@ -82,18 +85,18 @@ export class BluetoothPage {
    * Busca los dispositivos bluetooth dispositivos al arrastrar la pantalla hacia abajo.
    * @param refresher
    */
-  refreshBluetooth(refresher: Refresher) {
-    console.log(refresher);
-    if (refresher) {
-      this.buscarBluetooth().then((successMessage: Array<Object>) => {
-        this.devices = [];
-        this.devices = successMessage;
-        refresher.complete();
-      }, fail => {
-        this.presentToast(fail);
-        refresher.complete();
-      });
-    }
+  refreshBluetooth() {
+    let loading = this.loadingCtrl.create({ content: 'Buscando dispositivos, por favor espere un momento' })
+    void loading.present()
+    this.buscarBluetooth().then((successMessage: Array<Object>) => {
+      loading.dismissAll()
+      this.devices = [];
+      this.devices = successMessage;
+    }, fail => {
+      this.mostrarSpiner == true
+      loading.dismissAll()
+      this.presentToast(fail);
+    });
   }
   /**
    * Verifica si ya se encuentra conectado a un dispositivo bluetooth o no.
@@ -161,9 +164,13 @@ export class BluetoothPage {
    */
   conectar(id: string): Promise<any> {
     return new Promise((resolve, reject) => {
+      let loading = this.loadingCtrl.create({ content: 'Espere mientras se conecta' })
+      void loading.present()
       this.conexion = this.bluetoothSerial.connect(id).subscribe((data: Observable<any>) => {
         this.enviarMensajes();
-        resolve("Conectado");
+        this.conectado = true;
+        this.devices = []
+        loading.dismissAll()
       }, fail => {
         console.log(`[3] Error conexión: ${JSON.stringify(fail)}`);
         reject("No se logro conectar");
@@ -176,9 +183,11 @@ export class BluetoothPage {
   desconectar() {
     if (this.conexionMensajes) {
       this.conexionMensajes.unsubscribe();
+      this.conectado = false;
     }
     if (this.conexion) {
       this.conexion.unsubscribe();
+      this.conectado = false;
     }
   }
   /**
